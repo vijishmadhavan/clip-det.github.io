@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>OpenAI CLIP JavaScript - Image Demo - ONNX Web Runtime</title>
+  </head>
+  <body>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.12.0/dist/ort.js"></script>
+    
+    <div>
+    <img id="img" src="https://hotpotmedia.s3.us-east-2.amazonaws.com/8-xUQ4KJdibPWViS4.png" width="256" height="256">        
+      <br>
+      backend: <select id="backendSelectEl">
+        <option>wasm</option>
+      </select>
+      <br>
+      quantized: <select id="quantizedSelectEl">
+        <option value="large-model">large-model</option>
+        <option value="yes">yes (4x smaller model, but currently the predicitions might be inaccurate)</option>
+      </select>
+      <br>
+      <button id="startBtn" onclick="main()">start</button>
+
+    </div>
+    <p><a href="https://github.com/josephrocca/openai-clip-js">github repo</a> - <a href="https://huggingface.co/rocca/openai-clip-js/tree/main">huggingface repo</a></p>
+    
+    <script>
+      if(self.crossOriginIsolated) { // needs to be cross-origin-isolated to use wasm threads. you need to serve this html file with these two headers: https://web.dev/coop-coep/
+        ort.env.wasm.numThreads = navigator.hardwareConcurrency
+      }
+      
+      async function main() {
+        startBtn.disabled = true;
+        startBtn.innerHTML = "see console";
+
+        console.log("Loading text model... (see network tab for progress)");
+        let modelPatht = quantizedSelectEl.value === "large model" ? 'https://huggingface.co/rocca/openai-clip-js/resolve/main/clip-text-vit-32-float32-int32.onnx' : 'https://huggingface.co/rocca/openai-clip-js/resolve/main/clip-text-vit-32-uint8.onnx';
+        const sessions = await ort.InferenceSession.create(modelPatht, { executionProviders: ["wasm"] });
+        
+        let Tokenizer = (await import("https://deno.land/x/clip_bpe@v0.0.6/mod.js")).default;
+        let t = new Tokenizer();
+        
+ 
+        let textTokens2 = t.encodeForCLIP("Image is safe for work");
+        textTokens3 = t.encodeForCLIP("image of Sexy lady");
+        textTokens4 = t.encodeForCLIP("Image with nudity and porn");
+
+        textTokens2 = Int32Array.from(textTokens2);
+        textTokens3 = Int32Array.from(textTokens3);
+        textTokens4 = Int32Array.from(textTokens4);
+
+        const feedss2 = {'input': new ort.Tensor('int32', textTokens2, [1, 77])};
+        const feedss3 = {'input': new ort.Tensor('int32', textTokens3, [1, 77])};
+        const feedss4 = {'input': new ort.Tensor('int32', textTokens4, [1, 77])};
+
+        const resultss2 = await sessions.run(feedss2);
+        const resultss3 = await sessions.run(feedss3);
+        const resultss4 = await sessions.run(feedss4);
+
+        const dataa2 = resultss2["output"].data;
+        const dataa3 = resultss3["output"].data;
+        const dataa4 = resultss4["output"].data;
+
+        console.log("Downloading image model... (see network tab for progress)");
+        let modelPath = quantizedSelectEl.value === "no" ? 'https://huggingface.co/rocca/openai-clip-js/resolve/main/clip-image-vit-32-float32.onnx' : 'https://huggingface.co/rocca/openai-clip-js/resolve/main/clip-image-vit-32-uint8.onnx';
+        const session = await ort.InferenceSession.create(modelPath, { executionProviders: [backendSelectEl.value] });
+        console.log("Models loaded.");
+        image_Element = document.getElementById('img')
+        let rgbData = await getRgbData(image_Element);
+
+        const feeds = {'input': new ort.Tensor('float32', rgbData, [1,3,224,224])};
+
+        console.log("Running inference...");
+        const results = await session.run(feeds);
+        console.log("Finished inference.");
+
+        const data = results["output"].data;
+
+
+        const dot2 = dataa2.reduce((acc, val, i) => acc + val * data[i], 0);
+        const norm12 = Math.sqrt(dataa2.reduce((acc, val) => acc + val * val, 0));
+        const norm22 = Math.sqrt(data.reduce((acc, val) => acc + val * val, 0));
+        const cos2 = dot2 / (norm12 * norm22);
+
+        const dot3 = dataa3.reduce((acc, val, i) => acc + val * data[i], 0);
+        const norm13 = Math.sqrt(dataa3.reduce((acc, val) => acc + val * val, 0));
+        const norm23 = Math.sqrt(data.reduce((acc, val) => acc + val * val, 0));
+        const cos3 = dot3 / (norm13 * norm23);
+
+        const dot4 = dataa4.reduce((acc, val, i) => acc + val * data[i], 0);
+        const norm14 = Math.sqrt(dataa4.reduce((acc, val) => acc + val * val, 0));
+        const norm24 = Math.sqrt(data.reduce((acc, val) => acc + val * val, 0));
+        const cos4 = dot4 / (norm14 * norm24);
+
+        // cosine similarity in percentage
+ 
+        const cosPercentage2 = Math.round(cos2 * 100);
+        const cosPercentage3 = Math.round(cos3 * 100);
+        const cosPercentage4 = Math.round(cos4 * 100);
+        
+        // display results
+  
+        console.log(`Neutral: ${cosPercentage2}%`);
+        console.log(`Sexy: ${cosPercentage3}%`);
+        console.log(`Porn: ${cosPercentage4}%`);  
+
+      }
+     
+      async function getRgbData(image_Element) {
+        image_Element.setAttribute('crossOrigin', '');
+        let canvas = new OffscreenCanvas(224, 224);
+        let ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        let rgbData = [[], [], []]; // [r, g, b]
+        // remove alpha and put into correct shape:
+        let d = imageData.data;
+        for(let i = 0; i < d.length; i += 4) { 
+          let x = (i/4) % canvas.width;
+          let y = Math.floor((i/4) / canvas.width)
+          if(!rgbData[0][y]) rgbData[0][y] = [];
+          if(!rgbData[1][y]) rgbData[1][y] = [];
+          if(!rgbData[2][y]) rgbData[2][y] = [];
+          rgbData[0][y][x] = d[i+0]/255;
+          rgbData[1][y][x] = d[i+1]/255;
+          rgbData[2][y][x] = d[i+2]/255;
+          // From CLIP repo: Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+          rgbData[0][y][x] = (rgbData[0][y][x] - 0.48145466) / 0.26862954;
+          rgbData[1][y][x] = (rgbData[1][y][x] - 0.4578275) / 0.26130258;
+          rgbData[2][y][x] = (rgbData[2][y][x] - 0.40821073) / 0.27577711;
+        }
+        rgbData = Float32Array.from(rgbData.flat().flat());
+        return rgbData;
+      }
+
+    </script>
+  </body>
+</html>
+
+    
