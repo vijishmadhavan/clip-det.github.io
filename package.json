@@ -1,0 +1,14 @@
+{
+  "name": "nsfwproject",
+  "version": "1.0.0",
+  "description": "nsfw project",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@nsfwspy/browser": "^1.0.3"
+  }
+}
